@@ -50,7 +50,7 @@ export const getCurrencyRate = async (from: string, to: string): Promise<number>
     };
     const rate = payload.rates?.[toCurrency];
 
-    if (!Number.isFinite(rate)) {
+    if (typeof rate !== "number" || !Number.isFinite(rate)) {
       throw new Error("Rate API response missing requested currency rate");
     }
 

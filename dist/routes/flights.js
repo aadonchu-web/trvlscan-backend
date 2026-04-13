@@ -72,6 +72,8 @@ router.post("/search", async (req, res) => {
                     origin,
                     destination,
                     departure_date,
+                    arrival_time: null,
+                    departure_time: null,
                 },
             ],
             passengers: Array.from({ length: passengerCount }, () => ({

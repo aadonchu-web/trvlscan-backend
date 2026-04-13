@@ -43,11 +43,15 @@ const express_1 = __importDefault(require("express"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const bookings_1 = __importStar(require("./routes/bookings"));
 const flights_1 = __importDefault(require("./routes/flights"));
+const payments_1 = __importDefault(require("./routes/payments"));
+const webhooks_1 = __importDefault(require("./routes/webhooks"));
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
+app.use("/api/webhooks", webhooks_1.default);
 app.use(express_1.default.json());
 app.use("/api/flights", flights_1.default);
 app.use("/api/bookings", bookings_1.default);
+app.use("/api/payments", payments_1.default);
 const appRouter = app._router ?? app.router;
 if (appRouter?.stack) {
     appRouter.stack.forEach((middleware) => {
