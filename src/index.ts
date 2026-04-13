@@ -5,13 +5,17 @@ import express from "express";
 import cron from "node-cron";
 import bookingsRouter, { getSupabaseClient } from "./routes/bookings";
 import flightsRouter from "./routes/flights";
+import paymentsRouter from "./routes/payments";
+import webhooksRouter from "./routes/webhooks";
 
 const app = express();
 
 app.use(cors());
+app.use("/api/webhooks", webhooksRouter);
 app.use(express.json());
 app.use("/api/flights", flightsRouter);
 app.use("/api/bookings", bookingsRouter);
+app.use("/api/payments", paymentsRouter);
 
 const appRouter = (app as any)._router ?? (app as any).router;
 
