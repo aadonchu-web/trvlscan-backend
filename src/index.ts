@@ -1,5 +1,3 @@
-import dotenv from "dotenv";
-dotenv.config({ path: ".env" });
 import cors from "cors";
 import express from "express";
 import cron from "node-cron";
@@ -7,6 +5,13 @@ import bookingsRouter, { getSupabaseClient } from "./routes/bookings";
 import flightsRouter from "./routes/flights";
 import paymentsRouter from "./routes/payments";
 import webhooksRouter from "./routes/webhooks";
+
+if (process.env.NODE_ENV !== "production") {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("dotenv").config();
+  } catch (_e) {}
+}
 
 const app = express();
 
@@ -40,7 +45,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-const port = process.env.PORT || 3000;
+const port = parseInt(process.env.PORT || "3000", 10);
 
 cron.schedule("* * * * *", async () => {
   try {
