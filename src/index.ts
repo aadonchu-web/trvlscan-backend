@@ -2,6 +2,8 @@ import dotenv from "dotenv";
 dotenv.config();
 import cors from "cors";
 import express from "express";
+import cron from "node-cron";
+import bookingsRouter, { getSupabaseClient } from "./routes/bookings";
 import flightsRouter from "./routes/flights";
 
 const app = express();
@@ -9,6 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/flights", flightsRouter);
+app.use("/api/bookings", bookingsRouter);
 
 const appRouter = (app as any)._router ?? (app as any).router;
 
@@ -34,6 +37,25 @@ app.get("/health", (_req, res) => {
 });
 
 const port = Number(process.env.PORT) || 3000;
+
+cron.schedule("* * * * *", async () => {
+  try {
+    const supabase = getSupabaseClient();
+    const nowIso = new Date().toISOString();
+
+    const { error } = await supabase
+      .from("bookings")
+      .update({ status: "expired" })
+      .eq("status", "awaiting_payment")
+      .lt("expires_at", nowIso);
+
+    if (error) {
+      console.error("Booking expiry cron update failed:", error);
+    }
+  } catch (error) {
+    console.error("Booking expiry cron run failed:", error);
+  }
+});
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
