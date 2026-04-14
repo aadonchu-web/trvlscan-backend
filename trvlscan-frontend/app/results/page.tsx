@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createBooking } from "@/lib/api";
 
 type OfferRecord = Record<string, unknown>;
 
@@ -71,6 +73,7 @@ function formatDuration(value: string) {
 }
 
 export default function ResultsPage() {
+  const router = useRouter();
   const [offers, setOffers] = useState<OfferRecord[]>([]);
   const [searchInfo, setSearchInfo] = useState<{
     origin: string;
@@ -80,6 +83,8 @@ export default function ResultsPage() {
   } | null>(null);
   const [gbpUsdRate, setGbpUsdRate] = useState<number | null>(null);
   const [isRateLoading, setIsRateLoading] = useState(true);
+  const [bookingLoadingOfferId, setBookingLoadingOfferId] = useState<string | null>(null);
+  const [bookingErrorByOfferId, setBookingErrorByOfferId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const rawOffers = sessionStorage.getItem("searchOffers");
@@ -113,6 +118,45 @@ export default function ResultsPage() {
       }
     }
   }, []);
+
+  const handleSelect = async (offer: OfferRecord) => {
+    const offerId = readValue(offer, ["id"], "");
+    if (!offerId) {
+      return;
+    }
+
+    setBookingLoadingOfferId(offerId);
+    setBookingErrorByOfferId((prev) => ({ ...prev, [offerId]: "" }));
+
+    try {
+      const booking = (await createBooking({
+        offerId,
+        passengerName: "Test User",
+        passengerEmail: "test@test.com",
+        passengerDob: "1990-01-15",
+      })) as {
+        booking_id: string;
+        usd_amount?: number;
+        usdt_amount?: number;
+        expires_at?: string;
+      };
+
+      const payload = {
+        ...booking,
+        selected_offer: offer,
+        search_params: searchInfo,
+      };
+      sessionStorage.setItem("currentBooking", JSON.stringify(payload));
+      router.push(`/booking/${booking.booking_id}`);
+    } catch (error) {
+      setBookingErrorByOfferId((prev) => ({
+        ...prev,
+        [offerId]: error instanceof Error ? error.message : "Failed to create booking",
+      }));
+    } finally {
+      setBookingLoadingOfferId(null);
+    }
+  };
 
   useEffect(() => {
     const from = "GBP";
@@ -209,7 +253,10 @@ export default function ResultsPage() {
               ]);
               const totalCurrency = readValue(offer, ["total_currency", "currency"], "GBP");
               const offerId = readValue(offer, ["id"], "");
-              const usdEstimate = gbpUsdRate !== null ? (totalAmount * gbpUsdRate).toFixed(2) : null;
+              const usdtEstimate =
+                gbpUsdRate !== null ? (totalAmount * gbpUsdRate * 1.025).toFixed(2) : null;
+              const bookingError = bookingErrorByOfferId[offerId];
+              const isBooking = bookingLoadingOfferId === offerId;
 
               return (
                 <article
@@ -223,19 +270,34 @@ export default function ResultsPage() {
                   <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-blue-100/95">
                     <p>Duration: {formatDuration(duration)}</p>
                     <p>Stops: {stops}</p>
-                    <p className="col-span-2 text-sm text-blue-100/75">
-                      {totalAmount.toFixed(2)} {totalCurrency}
+                    <p className="col-span-2 text-lg font-semibold text-cyan-300">
+                      {isRateLoading
+                        ? "Calculating..."
+                        : usdtEstimate
+                          ? `≈ ${usdtEstimate} USDT`
+                          : `${totalAmount.toFixed(2)} ${totalCurrency}`}
                     </p>
-                    <p className="col-span-2 text-lg font-semibold text-white">
-                      {isRateLoading ? "Loading..." : usdEstimate ? `${usdEstimate} USD` : "Rate unavailable"}
+                    <p className="col-span-2 text-sm text-blue-100/75">
+                      {isRateLoading || usdtEstimate
+                        ? `${totalAmount.toFixed(2)} ${totalCurrency}`
+                        : `${totalAmount.toFixed(2)} ${totalCurrency} (USD rate unavailable)`}
                     </p>
                   </div>
                   <button
                     type="button"
+                    onClick={() => {
+                      void handleSelect(offer);
+                    }}
+                    disabled={isBooking}
                     className="mt-5 h-10 rounded-lg bg-white px-4 text-sm font-semibold text-[#072252] transition hover:bg-blue-100"
                   >
-                    Select
+                    {isBooking ? "Booking..." : "Select"}
                   </button>
+                  {bookingError ? (
+                    <p className="mt-3 text-sm text-red-300" role="alert">
+                      {bookingError}
+                    </p>
+                  ) : null}
                 </article>
               );
             })}
