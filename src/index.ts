@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import cron from "node-cron";
 import bookingsRouter, { getSupabaseClient } from "./routes/bookings";
+import currencyRouter from "./routes/currency";
 import flightsRouter from "./routes/flights";
 import paymentsRouter from "./routes/payments";
 import webhooksRouter from "./routes/webhooks";
@@ -21,6 +22,7 @@ app.use(express.json());
 app.use("/api/flights", flightsRouter);
 app.use("/api/bookings", bookingsRouter);
 app.use("/api/payments", paymentsRouter);
+app.use("/api/currency", currencyRouter);
 
 const appRouter = (app as any)._router ?? (app as any).router;
 
