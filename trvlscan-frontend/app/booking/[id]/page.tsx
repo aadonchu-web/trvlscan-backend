@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createPayment } from "@/lib/api";
+import { QRCodeSVG } from "qrcode.react";
+import { createPayment, getPaymentStatus } from "@/lib/api";
 
 type BookingPageProps = {
   params: {
@@ -28,6 +29,11 @@ type PaymentData = {
   pay_amount: number;
   pay_currency: string;
   expires_at?: string;
+};
+
+type PaymentStatusResponse = {
+  status?: string;
+  payment_status?: string;
 };
 
 function readValue(source: Record<string, unknown> | undefined, paths: string[], fallback = "-") {
@@ -90,6 +96,8 @@ export default function BookingPage({ params }: BookingPageProps) {
   const [isCreatingPayment, setIsCreatingPayment] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState("pending");
 
   useEffect(() => {
     const rawBooking = sessionStorage.getItem("currentBooking");
@@ -119,6 +127,7 @@ export default function BookingPage({ params }: BookingPageProps) {
       setIsCreatingPayment(true);
       setError(null);
       try {
+        if (!booking) return;
         const response = (await createPayment(booking.booking_id)) as PaymentData;
         if (!isCancelled) {
           setPayment(response);
@@ -142,6 +151,41 @@ export default function BookingPage({ params }: BookingPageProps) {
       isCancelled = true;
     };
   }, [booking?.booking_id]);
+
+  useEffect(() => {
+    if (!booking?.booking_id || paymentStatus === "confirmed") {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function pollStatus() {
+      try {
+        if (!booking) return;
+        const response = (await getPaymentStatus(booking.booking_id)) as PaymentStatusResponse;
+        if (isCancelled) {
+          return;
+        }
+
+        const nextStatus = (response.payment_status ?? response.status ?? "").toLowerCase();
+        if (nextStatus) {
+          setPaymentStatus(nextStatus);
+        }
+      } catch {
+        // Ignore transient polling errors and keep waiting state.
+      }
+    }
+
+    void pollStatus();
+    const intervalId = window.setInterval(() => {
+      void pollStatus();
+    }, 8000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [booking?.booking_id, paymentStatus]);
 
   useEffect(() => {
     const expiresAt = payment?.expires_at ?? booking?.expires_at;
@@ -168,12 +212,13 @@ export default function BookingPage({ params }: BookingPageProps) {
 
   const timerText = useMemo(() => {
     if (remainingSeconds === null) {
-      return "--:--";
+      return "--:--:--";
     }
 
-    const minutes = Math.floor(remainingSeconds / 60);
+    const hours = Math.floor(remainingSeconds / 3600);
+    const minutes = Math.floor((remainingSeconds % 3600) / 60);
     const seconds = remainingSeconds % 60;
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }, [remainingSeconds]);
 
   const offer = booking?.selected_offer;
@@ -184,49 +229,112 @@ export default function BookingPage({ params }: BookingPageProps) {
   const stops = readValue(offer, ["number_of_stops", "stops"], "0");
   const totalAmount = readValue(offer, ["total_amount"], "-");
   const totalCurrency = readValue(offer, ["total_currency"], "GBP");
+  const network = "Tron (TRC20)";
+
+  const handleCopyAddress = async () => {
+    if (!payment?.pay_address) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(payment.pay_address);
+      setCopySuccess(true);
+      window.setTimeout(() => {
+        setCopySuccess(false);
+      }, 1800);
+    } catch {
+      setCopySuccess(false);
+    }
+  };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#061834] via-[#0a2450] to-[#041022] px-6 py-12 text-white md:px-10">
-      <section className="mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-white/10 p-8 backdrop-blur">
-        <h1 className="text-3xl font-semibold">Payment</h1>
-        <p className="mt-3 text-blue-100/90">
-          Booking ID: <span className="font-medium text-white">{params.id}</span>
-        </p>
+    <main className="min-h-screen bg-[#EEF3FA] px-4 py-10 text-[#0B1F3A] md:px-8">
+      <section className="mx-auto w-full max-w-4xl rounded-2xl border border-[#DCE6F3] bg-white p-6 shadow-[0_20px_45px_rgba(12,33,66,0.12)] md:p-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-[#0F2748]">Transfer Funds now!</h1>
+            <p className="mt-2 text-sm text-slate-500">
+              Booking ID: <span className="font-medium text-[#0F2748]">{params.id}</span>
+            </p>
+            <p className="mt-4 text-sm font-semibold text-[#1C355E]">
+              Payment Amount 💎{" "}
+              <span className="text-lg text-[#0F2748]">
+                {(payment?.pay_amount ?? booking?.usdt_amount ?? 0).toFixed(2)} USDT (TRC20)
+              </span>
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-[#2563EB]">
+            <span>🕒</span>
+            <span>{timerText}</span>
+          </div>
+        </div>
 
-        <div className="mt-6 rounded-xl border border-white/10 bg-[#0b2a58]/60 p-5">
-          <h2 className="text-lg font-semibold">Flight summary</h2>
-          <p className="mt-2 text-sm text-blue-100/90">
+        <div className="mt-6 grid gap-6 rounded-xl border border-[#E3EBF6] bg-[#F9FBFF] p-5 md:grid-cols-2">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-[#E3EBF6] bg-white p-4">
+            <p className="mb-3 text-sm font-medium text-[#1C355E]">Scan this code</p>
+            {payment?.pay_address ? (
+              <QRCodeSVG value={payment.pay_address} size={150} />
+            ) : (
+              <div className="flex h-[150px] w-[150px] items-center justify-center rounded-lg bg-slate-100 text-sm text-slate-500">
+                Creating payment...
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#E3EBF6] bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Network</p>
+            <p className="mt-1 text-sm font-medium text-[#0F2748]">{network}</p>
+
+            <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Wallet Address
+            </p>
+            <div className="mt-2 flex items-start gap-3">
+              <p className="flex-1 break-all rounded-lg bg-[#F4F7FC] p-3 text-sm text-[#0F2748]">
+                {isCreatingPayment ? "Creating payment..." : payment?.pay_address ?? "Address unavailable"}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopyAddress();
+                }}
+                disabled={!payment?.pay_address}
+                className="rounded-lg bg-[#0F2748] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#13335e] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {copySuccess ? "Copied!" : "Copy"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-[#E3EBF6] bg-white p-4">
+          {paymentStatus === "confirmed" ? (
+            <p className="text-sm font-semibold text-emerald-600">
+              Payment confirmed. Your booking is now secured.
+            </p>
+          ) : (
+            <div className="flex items-center gap-3 text-sm font-medium text-[#1C355E]">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#BFDBFE] border-t-[#2563EB]" />
+              <span>Awaiting payment confirmation...</span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-xl border border-[#E3EBF6] bg-[#F9FBFF] p-4">
+          <p className="text-sm text-[#1C355E]">
             {booking?.search_params?.origin ?? "-"} to {booking?.search_params?.destination ?? "-"} on{" "}
             {booking?.search_params?.departure_date ?? "-"} for {booking?.search_params?.passengers ?? 1}{" "}
             passenger(s)
           </p>
-          <p className="mt-2 text-sm text-blue-100/90">
+          <p className="mt-2 text-sm text-[#456287]">
             {airline} | {formatTime(departure)} - {formatTime(arrival)} | {formatDuration(duration)} | {stops}{" "}
             stop(s)
           </p>
-          <p className="mt-2 text-sm text-blue-100/75">
+          <p className="mt-2 text-sm text-slate-500">
             Offer price: {totalAmount} {totalCurrency}
           </p>
         </div>
 
-        <div className="mt-6 rounded-xl border border-white/10 bg-[#0b2a58]/60 p-5">
-          <p className="text-sm text-blue-100/80">USDT amount to pay</p>
-          <p className="mt-1 text-3xl font-semibold text-cyan-300">
-            {booking?.usdt_amount?.toFixed(4) ?? "-"} USDT
-          </p>
-          <p className="mt-4 text-sm text-blue-100/80">Wallet address (QR placeholder)</p>
-          <p className="mt-1 break-all rounded-lg bg-[#041022]/60 p-3 text-sm text-white">
-            {isCreatingPayment
-              ? "Creating payment..."
-              : payment?.pay_address ?? "Address unavailable"}
-          </p>
-          <p className="mt-4 text-sm text-blue-100/80">Time remaining</p>
-          <p className="mt-1 text-xl font-semibold text-white">{timerText}</p>
-          <p className="mt-4 text-sm text-yellow-300">Payment status: Waiting for payment...</p>
-        </div>
-
         {error ? (
-          <p className="mt-4 text-sm text-red-300" role="alert">
+          <p className="mt-4 text-sm text-red-600" role="alert">
             {error}
           </p>
         ) : null}

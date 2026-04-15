@@ -39,6 +39,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const crypto_1 = __importDefault(require("crypto"));
 const express_1 = __importStar(require("express"));
 const bookings_1 = require("./bookings");
+const duffelBooking_1 = require("../services/duffelBooking");
+const email_1 = require("../services/email");
 const router = (0, express_1.Router)();
 const getIpnSecret = () => {
     const ipnSecret = process.env.NOWPAYMENTS_IPN_SECRET;
@@ -133,6 +135,49 @@ router.post("/nowpayments", express_1.default.raw({ type: "application/json" }),
         if (bookingUpdateError) {
             console.error("Supabase booking update failed:", bookingUpdateError);
             return res.status(500).json({ error: "Failed to update booking status" });
+        }
+        const { data: fullBooking } = await supabase
+            .from("bookings")
+            .select("id, offer_id, passenger_name, passenger_email, passenger_dob, usdt_amount")
+            .eq("id", booking.id)
+            .single();
+        if (fullBooking?.offer_id && fullBooking?.passenger_name) {
+            try {
+                const nameParts = fullBooking.passenger_name.trim().split(" ");
+                const givenName = nameParts[0] ?? "Passenger";
+                const familyName = nameParts.slice(1).join(" ") || givenName;
+                const order = await (0, duffelBooking_1.createDuffelOrder)(fullBooking.offer_id, {
+                    given_name: givenName,
+                    family_name: familyName,
+                    born_on: fullBooking.passenger_dob,
+                    email: fullBooking.passenger_email,
+                    gender: "m",
+                    title: "mr",
+                });
+                const bookingReference = order.booking_reference ?? order.id ?? `TRVL${booking.id.slice(0, 6).toUpperCase()}`;
+                const airline = order.owner?.name ?? "Airline";
+                const slices = order.slices ?? [];
+                const firstSegment = slices[0]?.segments?.[0];
+                const departureTime = firstSegment?.departing_at ?? "";
+                const origin = firstSegment?.origin?.iata_code ?? "";
+                const destination = slices[slices.length - 1]?.segments?.slice(-1)[0]?.destination?.iata_code ?? "";
+                await supabase.from("bookings").update({ duffel_order_id: order.id, status: "confirmed" }).eq("id", booking.id);
+                await (0, email_1.sendBookingConfirmationEmail)({
+                    to: fullBooking.passenger_email,
+                    passengerName: fullBooking.passenger_name,
+                    bookingId: booking.id,
+                    bookingReference,
+                    origin,
+                    destination,
+                    departureTime: departureTime ? new Date(departureTime).toLocaleString() : "-",
+                    airline,
+                    usdtAmount: Number(fullBooking.usdt_amount ?? 0),
+                });
+                console.log("Duffel order created:", order.id, "Reference:", bookingReference);
+            }
+            catch (orderError) {
+                console.error("Duffel order or email failed (non-fatal):", orderError);
+            }
         }
         return res.status(200).json({ ok: true });
     }

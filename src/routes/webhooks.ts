@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import express, { Router } from "express";
 import { getSupabaseClient } from "./bookings";
+import { createDuffelOrder } from "../services/duffelBooking";
+import { sendBookingConfirmationEmail } from "../services/email";
 
 const router = Router();
 
@@ -130,6 +132,56 @@ router.post("/nowpayments", express.raw({ type: "application/json" }), async (re
     if (bookingUpdateError) {
       console.error("Supabase booking update failed:", bookingUpdateError);
       return res.status(500).json({ error: "Failed to update booking status" });
+    }
+
+    const { data: fullBooking } = await supabase
+      .from("bookings")
+      .select("id, offer_id, passenger_name, passenger_email, passenger_dob, usdt_amount")
+      .eq("id", booking.id)
+      .single();
+
+    if (fullBooking?.offer_id && fullBooking?.passenger_name) {
+      try {
+        const nameParts = (fullBooking.passenger_name as string).trim().split(" ");
+        const givenName = nameParts[0] ?? "Passenger";
+        const familyName = nameParts.slice(1).join(" ") || givenName;
+
+        const order = await createDuffelOrder(fullBooking.offer_id as string, {
+          given_name: givenName,
+          family_name: familyName,
+          born_on: fullBooking.passenger_dob as string,
+          email: fullBooking.passenger_email as string,
+          gender: "m",
+          title: "mr",
+        });
+
+        const bookingReference =
+          order.booking_reference ?? order.id ?? `TRVL${booking.id.slice(0, 6).toUpperCase()}`;
+        const airline = (order as any).owner?.name ?? "Airline";
+        const slices = (order as any).slices ?? [];
+        const firstSegment = slices[0]?.segments?.[0];
+        const departureTime = firstSegment?.departing_at ?? "";
+        const origin = firstSegment?.origin?.iata_code ?? "";
+        const destination = slices[slices.length - 1]?.segments?.slice(-1)[0]?.destination?.iata_code ?? "";
+
+        await supabase.from("bookings").update({ duffel_order_id: order.id, status: "confirmed" }).eq("id", booking.id);
+
+        await sendBookingConfirmationEmail({
+          to: fullBooking.passenger_email as string,
+          passengerName: fullBooking.passenger_name as string,
+          bookingId: booking.id,
+          bookingReference,
+          origin,
+          destination,
+          departureTime: departureTime ? new Date(departureTime).toLocaleString() : "-",
+          airline,
+          usdtAmount: Number(fullBooking.usdt_amount ?? 0),
+        });
+
+        console.log("Duffel order created:", order.id, "Reference:", bookingReference);
+      } catch (orderError) {
+        console.error("Duffel order or email failed (non-fatal):", orderError);
+      }
     }
 
     return res.status(200).json({ ok: true });

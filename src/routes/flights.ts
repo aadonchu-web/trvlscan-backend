@@ -144,4 +144,31 @@ router.get("/offer/:id", async (req, res) => {
   }
 });
 
+router.get("/airports", async (req, res) => {
+  try {
+    const duffel = getDuffelClient();
+    const query = req.query.query as string;
+
+    if (!query || query.length < 2) {
+      return res.json([]);
+    }
+
+    const response = await duffel.suggestions.list({ query });
+
+    const airports = (response.data ?? [])
+      .filter((s: any) => s.type === "airport")
+      .slice(0, 6)
+      .map((s: any) => ({
+        iata_code: s.iata_code,
+        name: s.name,
+        city: s.city_name ?? "",
+      }));
+
+    return res.json(airports);
+  } catch (error) {
+    console.error("Airport search failed:", error);
+    return res.status(500).json({ error: "Failed to search airports" });
+  }
+});
+
 export default router;
