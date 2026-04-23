@@ -84,12 +84,54 @@ const simplifyOffer = (offer: DuffelOffer) => {
 router.post("/search", async (req, res) => {
   try {
     const duffel = getDuffelClient();
-    const { origin, destination, departure_date, passengers } = req.body ?? {};
+    const {
+      slices: rawSlices,
+      origin,
+      destination,
+      departure_date,
+      passengers,
+      cabin_class,
+    } = req.body ?? {};
 
-    if (!origin || !destination || !departure_date || passengers === undefined) {
+    const inputSlices = Array.isArray(rawSlices) && rawSlices.length > 0
+      ? rawSlices
+      : origin && destination && departure_date
+      ? [{ origin, destination, departure_date }]
+      : null;
+
+    if (!inputSlices) {
       return res.status(400).json({
         error:
-          "Missing required fields: origin, destination, departure_date, passengers",
+          "Missing required fields: provide slices[] or origin, destination, departure_date",
+      });
+    }
+
+    if (passengers === undefined) {
+      return res.status(400).json({
+        error: "Missing required field: passengers",
+      });
+    }
+
+    const normalizedSlices = [] as Array<{
+      origin: string;
+      destination: string;
+      departure_date: string;
+      arrival_time: null;
+      departure_time: null;
+    }>;
+
+    for (const slice of inputSlices) {
+      if (!slice || !slice.origin || !slice.destination || !slice.departure_date) {
+        return res.status(400).json({
+          error: "Each slice must include origin, destination, and departure_date",
+        });
+      }
+      normalizedSlices.push({
+        origin: slice.origin,
+        destination: slice.destination,
+        departure_date: slice.departure_date,
+        arrival_time: null,
+        departure_time: null,
       });
     }
 
@@ -102,19 +144,11 @@ router.post("/search", async (req, res) => {
     }
 
     const offerRequestResponse = await duffel.offerRequests.create({
-      slices: [
-        {
-          origin,
-          destination,
-          departure_date,
-          arrival_time: null,
-          departure_time: null,
-        },
-      ],
+      slices: normalizedSlices,
       passengers: Array.from({ length: passengerCount }, () => ({
         type: "adult",
       })),
-      cabin_class: "economy",
+      cabin_class: cabin_class ?? "economy",
       return_offers: true,
     });
 
