@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if grep -qE '(duffel_test_|SUPABASE_SERVICE_KEY|NOWPAYMENTS_API_KEY|IPN_SECRET|sb_secret)' \"$CLAUDE_FILE_PATH\" 2>/dev/null; then echo '{\"decision\": \"deny\", \"reason\": \"Secret detected in file!\"}'; else echo '{\"decision\": \"allow\"}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
