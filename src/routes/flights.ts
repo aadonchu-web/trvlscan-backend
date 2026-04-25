@@ -43,40 +43,57 @@ type DuffelOffer = {
   }>;
 };
 
-const simplifyOffer = (offer: DuffelOffer) => {
-  const firstSlice = offer.slices?.[0];
-  const segments = firstSlice?.segments ?? [];
+const simplifySegment = (segment: NonNullable<NonNullable<DuffelOffer["slices"]>[number]["segments"]>[number]) => ({
+  id: segment.id,
+  departure_time: segment.departing_at,
+  arrival_time: segment.arriving_at,
+  duration: segment.duration ?? null,
+  origin: segment.origin?.iata_code ?? null,
+  destination: segment.destination?.iata_code ?? null,
+  marketing_carrier: {
+    code: segment.marketing_carrier?.iata_code ?? null,
+    name: segment.marketing_carrier?.name ?? null,
+  },
+  operating_carrier: {
+    code: segment.operating_carrier?.iata_code ?? null,
+    name: segment.operating_carrier?.name ?? null,
+  },
+});
+
+const simplifySlice = (slice: NonNullable<DuffelOffer["slices"]>[number]) => {
+  const segments = slice.segments ?? [];
   const firstSegment = segments[0];
   const lastSegment = segments[segments.length - 1];
+
+  return {
+    origin: firstSegment?.origin?.iata_code ?? null,
+    destination: lastSegment?.destination?.iata_code ?? null,
+    departure_time: firstSegment?.departing_at ?? null,
+    arrival_time: lastSegment?.arriving_at ?? null,
+    duration: slice.duration ?? null,
+    number_of_stops: Math.max(segments.length - 1, 0),
+    segments: segments.map(simplifySegment),
+  };
+};
+
+const simplifyOffer = (offer: DuffelOffer) => {
+  const slices = (offer.slices ?? []).map(simplifySlice);
+  const firstSlice = slices[0];
 
   return {
     id: offer.id,
     total_amount: offer.total_amount,
     total_currency: offer.total_currency,
-    departure_time: firstSegment?.departing_at ?? null,
-    arrival_time: lastSegment?.arriving_at ?? null,
+    departure_time: firstSlice?.departure_time ?? null,
+    arrival_time: firstSlice?.arrival_time ?? null,
     duration: firstSlice?.duration ?? null,
     airline: {
       name: offer.owner?.name ?? null,
       logo_url: offer.owner?.logo_url ?? null,
     },
-    number_of_stops: Math.max(segments.length - 1, 0),
-    segments: segments.map((segment) => ({
-      id: segment.id,
-      departure_time: segment.departing_at,
-      arrival_time: segment.arriving_at,
-      duration: segment.duration ?? null,
-      origin: segment.origin?.iata_code ?? null,
-      destination: segment.destination?.iata_code ?? null,
-      marketing_carrier: {
-        code: segment.marketing_carrier?.iata_code ?? null,
-        name: segment.marketing_carrier?.name ?? null,
-      },
-      operating_carrier: {
-        code: segment.operating_carrier?.iata_code ?? null,
-        name: segment.operating_carrier?.name ?? null,
-      },
-    })),
+    number_of_stops: firstSlice?.number_of_stops ?? 0,
+    segments: firstSlice?.segments ?? [],
+    slices,
     expires_at: offer.expires_at,
   };
 };
