@@ -19,17 +19,40 @@ const getDuffelClient = () => {
   });
 };
 
+type DuffelCondition = {
+  allowed?: boolean;
+  penalty_amount?: string | null;
+  penalty_currency?: string | null;
+} | null;
+
+type DuffelBaggage = {
+  type?: string;
+  quantity?: number;
+};
+
+type DuffelPassengerOnSegment = {
+  cabin_class?: string | null;
+  cabin_class_marketing_name?: string | null;
+  baggages?: DuffelBaggage[];
+};
+
 type DuffelOffer = {
   id: string;
   total_amount: string;
   total_currency: string;
   expires_at?: string;
+  cabin_class?: string | null;
+  conditions?: {
+    change_before_departure?: DuffelCondition;
+    refund_before_departure?: DuffelCondition;
+  };
   owner?: {
     name?: string;
     logo_url?: string | null;
   };
   slices?: Array<{
     duration?: string | null;
+    fare_brand_name?: string | null;
     segments?: Array<{
       id: string;
       departing_at: string;
@@ -39,9 +62,81 @@ type DuffelOffer = {
       destination?: { iata_code?: string };
       marketing_carrier?: { iata_code?: string; name?: string };
       operating_carrier?: { iata_code?: string; name?: string };
+      passengers?: DuffelPassengerOnSegment[];
     }>;
   }>;
 };
+
+type BaggageEntry = { included: boolean; quantity: number };
+
+type FarePolicy = {
+  allowed: boolean;
+  penalty_amount: string | null;
+  penalty_currency: string | null;
+};
+
+const titleCase = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+};
+
+const extractFareBrandName = (offer: DuffelOffer): string | null => {
+  const firstSlice = offer.slices?.[0];
+  return firstSlice?.fare_brand_name ?? null;
+};
+
+const extractCabinClassMarketingName = (offer: DuffelOffer): string | null => {
+  const firstPassenger = offer.slices?.[0]?.segments?.[0]?.passengers?.[0];
+  if (firstPassenger?.cabin_class_marketing_name) {
+    return firstPassenger.cabin_class_marketing_name;
+  }
+  return titleCase(offer.cabin_class ?? null);
+};
+
+const extractBaggageSummary = (
+  offer: DuffelOffer,
+): { carry_on: BaggageEntry; checked: BaggageEntry } => {
+  const slices = offer.slices ?? [];
+  if (slices.length === 0) {
+    return {
+      carry_on: { included: false, quantity: 0 },
+      checked: { included: false, quantity: 0 },
+    };
+  }
+
+  let minCarryOn = Infinity;
+  let minChecked = Infinity;
+
+  for (const slice of slices) {
+    const firstPassenger = slice.segments?.[0]?.passengers?.[0];
+    const baggages = firstPassenger?.baggages ?? [];
+
+    let carryOnQty = 0;
+    let checkedQty = 0;
+    for (const bag of baggages) {
+      const qty = typeof bag.quantity === "number" ? bag.quantity : 0;
+      if (bag.type === "carry_on") carryOnQty += qty;
+      else if (bag.type === "checked") checkedQty += qty;
+    }
+
+    if (carryOnQty < minCarryOn) minCarryOn = carryOnQty;
+    if (checkedQty < minChecked) minChecked = checkedQty;
+  }
+
+  if (!Number.isFinite(minCarryOn)) minCarryOn = 0;
+  if (!Number.isFinite(minChecked)) minChecked = 0;
+
+  return {
+    carry_on: { included: minCarryOn > 0, quantity: minCarryOn },
+    checked: { included: minChecked > 0, quantity: minChecked },
+  };
+};
+
+const extractPolicy = (condition: DuffelCondition | undefined): FarePolicy => ({
+  allowed: condition?.allowed ?? false,
+  penalty_amount: condition?.penalty_amount ?? null,
+  penalty_currency: condition?.penalty_currency ?? null,
+});
 
 const simplifySegment = (segment: NonNullable<NonNullable<DuffelOffer["slices"]>[number]["segments"]>[number]) => ({
   id: segment.id,
@@ -95,6 +190,11 @@ const simplifyOffer = (offer: DuffelOffer) => {
     segments: firstSlice?.segments ?? [],
     slices,
     expires_at: offer.expires_at,
+    fare_brand_name: extractFareBrandName(offer),
+    cabin_class_marketing_name: extractCabinClassMarketingName(offer),
+    baggage_summary: extractBaggageSummary(offer),
+    change_policy: extractPolicy(offer.conditions?.change_before_departure),
+    refund_policy: extractPolicy(offer.conditions?.refund_before_departure),
   };
 };
 
